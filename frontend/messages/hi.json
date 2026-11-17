@@ -1,0 +1,86 @@
+{
+  "common": {
+    "tagline": "आपके परिवार का पूरा दिन, एक नज़र में।",
+    "loading": "लोड हो रहा है",
+    "tryAgain": "फिर से कोशिश करें",
+    "close": "बंद करें",
+    "offline": "Rhythm से जुड़ नहीं पा रहे। अपना कनेक्शन जाँचें और फिर से कोशिश करें।",
+    "somethingWrong": "कुछ गड़बड़ हो गई"
+  },
+  "nav": {
+    "main": "मुख्य",
+    "today": "आज",
+    "tasks": "काम",
+    "fitness": "फ़िटनेस",
+    "food": "खाना",
+    "family": "परिवार",
+    "settings": "सेटिंग्स"
+  },
+  "auth": {
+    "signIn": "साइन इन करें",
+    "createAccount": "खाता बनाएँ",
+    "createAccountTitle": "अपना खाता बनाएँ",
+    "newHere": "पहली बार आए हैं?",
+    "createAnAccount": "खाता बनाएँ",
+    "haveAccount": "पहले से खाता है?",
+    "yourName": "आपका नाम",
+    "email": "ईमेल",
+    "password": "पासवर्ड",
+    "passwordHint": "कम से कम 8 अक्षर"
+  },
+  "errors": {
+    "serverTitle": "Rhythm अपने सर्वर से नहीं जुड़ पा रहा",
+    "serverBody": "आपका डेटा सुरक्षित है। यह आमतौर पर एक मिनट में ठीक हो जाता है।"
+  },
+  "today": {
+    "yourDay": "आपका दिन",
+    "greeting": {
+      "dawn": "सुप्रभात, {name}",
+      "day": "नमस्ते, {name}",
+      "dusk": "शुभ संध्या, {name}",
+      "night": "शुभ रात्रि, {name}"
+    },
+    "timeIs": "अभी {time} बजे हैं",
+    "doneCount": "{total} में से {done} हो गए",
+    "nothingScheduled": "कुछ तय नहीं है",
+    "parts": {
+      "Morning": "सुबह",
+      "Afternoon": "दोपहर",
+      "Evening": "शाम",
+      "Night": "रात"
+    },
+    "nowAt": "अभी, {time}",
+    "status": {
+      "done": "हो गया",
+      "late": "देर",
+      "now": "अभी",
+      "pending": "अभी नहीं हुआ"
+    },
+    "forPerson": "{name} के लिए",
+    "streak": "लगातार {count} दिन",
+    "thisWeek": "इस हफ़्ते",
+    "weekProgress": "इस हफ़्ते {target} में से {count}",
+    "doneToday": "आज हो गया",
+    "undoToday": "आज का हटाएँ",
+    "emptyTitle": "अभी कुछ तय नहीं है",
+    "emptyBody": "सुबह से रात तक का एक तैयार रूटीन जोड़ें और उसे बदलें, या अपना ख़ुद का बनाएँ।",
+    "addStarter": "तैयार रूटीन जोड़ें",
+    "createTask": "काम बनाएँ",
+    "addedStarter": "आपके दिन में {count} काम जोड़े गए"
+  },
+  "settings": {
+    "title": "सेटिंग्स",
+    "appearance": "रूप",
+    "theme": "थीम",
+    "themes": {
+      "system": "डिवाइस के अनुसार",
+      "light": "हल्की",
+      "dark": "गहरी",
+      "kids": "बच्चों के लिए",
+      "large": "बड़े अक्षर"
+    },
+    "themeHint": "आपके खाते में सेव होती है, इसलिए हर डिवाइस पर आपके साथ रहती है।",
+    "language": "भाषा",
+    "signOut": "साइन आउट करें"
+  }
+}

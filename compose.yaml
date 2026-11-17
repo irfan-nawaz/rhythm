@@ -1,0 +1,60 @@
+# Local dependencies only: Postgres, two Valkey instances and a mail catcher.
+# Rhythm's own processes run on your machine with npm (see README.md).
+# Packaging the app into images and running it in production is the exercise.
+#
+#   docker compose up -d       start everything
+#   docker compose down        stop (data is kept in volumes)
+#   docker compose down -v     stop and delete the data
+
+name: rhythm
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: rhythm
+      POSTGRES_PASSWORD: rhythm
+      POSTGRES_DB: rhythm
+    ports: ['5432:5432']
+    # Postgres 18 images keep data in /var/lib/postgresql/18/docker, so the
+    # volume goes on /var/lib/postgresql (17 and older used .../data).
+    volumes: ['pgdata:/var/lib/postgresql']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U rhythm -d rhythm']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Cache: safe to lose, so it evicts the least recently used keys when full
+  # and writes nothing to disk.
+  cache:
+    image: valkey/valkey:9.1-alpine
+    command: ['valkey-server', '--maxmemory', '128mb', '--maxmemory-policy', 'allkeys-lru', '--save', '', '--appendonly', 'no']
+    ports: ['6379:6379']
+    healthcheck:
+      test: ['CMD', 'valkey-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Queue: BullMQ jobs must never be evicted or lost in a restart, so no
+  # eviction and an append-only file on a volume.
+  queue:
+    image: valkey/valkey:9.1-alpine
+    command: ['valkey-server', '--maxmemory-policy', 'noeviction', '--appendonly', 'yes', '--appendfsync', 'everysec']
+    ports: ['6380:6379']
+    volumes: ['queuedata:/data']
+    healthcheck:
+      test: ['CMD', 'valkey-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Catches every email the worker sends. Inbox at http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:latest
+    ports: ['1025:1025', '8025:8025']
+
+volumes:
+  pgdata:
+  queuedata:

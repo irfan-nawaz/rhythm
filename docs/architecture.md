@@ -197,6 +197,58 @@ sequenceDiagram
 - Reminders more than `NOTIFY_MAX_LATENESS_MINUTES` late (default 180) are
   skipped: after an outage, nobody gets a burst of stale "brush your teeth".
 
+Four kinds of reminder go through this pipeline:
+
+| Kind | When | How |
+|---|---|---|
+| `task_due` | at the due time, for tasks with "also remind at the due time" | a second scheduler pass over `tasks.next_nudge_at`, same locking and outbox |
+| `task_overdue` | at the due time plus grace, if not done | the pass shown above, over `tasks.next_check_at` |
+| `task_escalated` | a set time after that (15 minutes to 2 hours), if still not done, to someone else: "if Papa hasn't taken his BP tablet by 9:30, tell me" | a third pass over `tasks.next_escalation_at`, same locking and outbox |
+| `task_snoozed` | 15 minutes after someone taps Snooze | `POST /api/tasks/:id/snooze` writes a row with `send_after` and queues a delayed job |
+
+Before sending any of them the worker checks whether the task was ticked
+off in the meantime; if so the row becomes `cancelled` instead of `sent`. The
+sweep leaves a snoozed row alone until two minutes past its `send_after`.
+
+Reminder pushes carry the task id and the day, and the service worker turns
+them into Done and Snooze buttons that call the API directly, using the
+session cookie of that browser. If the call fails (signed out, offline), it
+shows a second notification saying so rather than failing silently.
+
+### Schedules
+
+A task repeats daily, on chosen weekdays, a number of times a week, every N
+days, N days after it was last done, monthly (the 31st means the last day of
+a shorter month), yearly (29 February falls on the 28th in other years) or
+once. The rules live in `backend/src/domain/schedule.ts`: pure functions,
+unit tested, used by the API, the scheduler and the seed alike. Each task
+row stores its next check, heads-up and escalation times (`next_*_at`), so
+the scheduler's passes are index scans rather than schedule maths over
+every task.
+
+Bills and one-offs carry over: an unpaid rent stays on Today, under "Still
+to do", until it's done, and the tick counts for the day it was due.
+"N days after it was last done" counts from the latest completion, so
+ticking or unticking one recomputes that task's `next_*_at` times.
+
+### Log once
+
+Logging a meal (`POST /api/nutrition/entries`) or the first set of a workout
+(`POST /api/workouts/:id/sets`) ticks off the tasks linked to it: your own
+"Lunch" or "Gym". It's an insert into `task_completions` that does nothing
+if the day is already ticked, followed by a `task.changed` event, so it adds
+one query per logged meal. Linked tasks are only the person's own (in their
+personal group, or assigned to them), never a shared unassigned chore.
+
+### Week, month and year views
+
+`GET /api/calendar?from=&to=` (at most 400 days) returns, for the tasks
+Today shows, what was due each day and what got done: per-day totals, the
+dated things (bills, birthdays, one-offs), each task's completion rate and,
+for ranges up to six weeks, a mark per task per day. It's worked out in the
+API process from the schedules and one query for the range's completions;
+`backend/src/domain/calendar.ts` holds the logic and its tests.
+
 ### Sessions and caching
 
 A session is a random token in an httpOnly, SameSite=Lax cookie; Postgres
@@ -210,8 +262,19 @@ the scheduler.
 
 Counters live in Valkey, keyed by user when signed in and by client IP when
 not: `RATE_LIMIT_MAX` requests a minute (300), and `RATE_LIMIT_AUTH_MAX`
-sign-in and sign-up attempts a minute per IP (10). If Valkey is down, limits
-fail open rather than blocking everyone.
+sign-in and sign-up attempts a minute per IP (10). Opening and accepting an
+invite link share the sign-in limit. If Valkey is down, limits fail open
+rather than blocking everyone.
+
+### Invite links
+
+Owners and admins of a shared group create links at
+`/api/groups/:id/invites`. A group link lets up to 10 people join as
+members; a link made for a managed member lets one person take that member
+over, tasks and history included. Links last 7 days and can be turned off
+early. Like sessions, only the token's SHA-256 is stored, so the link is
+shown once. Accepting locks the invite row for the whole transaction, so two
+people can't both take the last use.
 
 ### Webhooks
 
@@ -227,7 +290,7 @@ account.
 
 Postgres holds everything that matters: users, sessions, groups and members,
 tasks and completions, workouts and sets, foods and food entries,
-notifications, push subscriptions, webhooks. No extensions are required.
+notifications, push subscriptions, webhooks, invites. No extensions are required.
 
 Tables that grow without limit and will need a retention job: `notifications`
 (one row per reminder), `task_completions`, `food_entries`, `workout_sets`.
@@ -261,37 +324,43 @@ Ordered roughly by how soon a global load test will find it.
 4. **Food search scans the table.** `ILIKE '%term%'` can't use a normal
    index. Fine for the catalogue; slow once users add thousands of foods. Add
    `pg_trgm` and a GIN trigram index on `foods.name` in a new migration.
-5. **One Valkey for both cache and queue loses jobs.** The cache evicts keys
+5. **The year view is the heaviest read.** `GET /api/calendar` for a year
+   reads every completion in it (thousands of rows for a busy family) and
+   walks 365 days for each task in the API process: about 13 ms for the demo
+   account, more for big families, and it's CPU on the API, not the
+   database. If it shows up in profiles, cache the response per user and
+   range for a minute and drop it on `task.changed`.
+6. **One Valkey for both cache and queue loses jobs.** The cache evicts keys
    when full (`allkeys-lru`); BullMQ needs `noeviction` or it silently loses
    jobs. Keep them separate, as `compose.yaml` does.
-6. **SSE behind proxies.** Long-lived responses meet idle timeouts (the
+7. **SSE behind proxies.** Long-lived responses meet idle timeouts (the
    25-second heartbeat keeps most of them open), buffering (the API sends
    `X-Accel-Buffering: no` for nginx; check others) and compression that
    holds events back. Browsers allow only six HTTP/1.1 connections per site,
    so serve HTTP/2 at the edge. Long streams also skew least-connections
    balancing, and every API process receives every user's events, which is
    fine up to tens of processes.
-7. **The web build bakes in some configuration.** The `/api/*` rewrite's
+8. **The web build bakes in some configuration.** The `/api/*` rewrite's
    destination is written into `.next/routes-manifest.json` by `next build`.
    Tested: built with `API_INTERNAL_URL=http://localhost:4000`, then started
    with `http://localhost:4999`, the rewrite still went to 4000, while
    server-side calls used 4999. Build with the right value or, better, route
    `/api/*` at the load balancer. The same applies to any `NEXT_PUBLIC_*`
    variable (none are used yet).
-8. **Rolling deploys of the web app.** Each build has different JavaScript
+9. **Rolling deploys of the web app.** Each build has different JavaScript
    chunk names. A browser holding a page from the old version asks for old
    chunks; if the new pods don't have them, navigation breaks until reload.
    Serve `.next/static` from a CDN or bucket that keeps previous versions, or
    look at Next.js's `deploymentId` setting.
-9. **The worker needs outbound internet.** Push goes to Google's, Apple's and
-   Mozilla's push services, email to your SMTP provider, webhooks anywhere. In
-   a private subnet that means a NAT gateway; consider an egress proxy for
-   webhooks.
-10. **Push needs HTTPS and stable keys.** Browsers allow push only on secure
+10. **The worker needs outbound internet.** Push goes to Google's, Apple's and
+    Mozilla's push services, email to your SMTP provider, webhooks anywhere. In
+    a private subnet that means a NAT gateway; consider an egress proxy for
+    webhooks.
+11. **Push needs HTTPS and stable keys.** Browsers allow push only on secure
     origins (and localhost). On iPhone it works from iOS 16.4, after the app
     is added to the home screen. Rotating VAPID keys silently ends every
     existing subscription.
-11. **Time.** Deadlines are computed in each group's time zone, so server
+12. **Time.** Deadlines are computed in each group's time zone, so server
     clocks must be NTP-synced; the container's own time zone doesn't matter.
 
 ## Not included, on purpose

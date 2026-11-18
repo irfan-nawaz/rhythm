@@ -6,13 +6,28 @@ import { logger } from '../logger.js';
 import { notificationDeliveries } from '../metrics.js';
 import { publishToUsers } from '../events.js';
 import { deliverWebhook, type WebhookTarget } from '../webhooks.js';
-import { createMailer, isGoneSubscription, sendEmail, sendPush, type PushTarget } from './channels.js';
+import { createMailer, isGoneSubscription, sendEmail, sendPush, type PushActions, type PushTarget } from './channels.js';
 
-export type DeliveryResult = 'sent' | 'skipped' | 'missing' | 'already_processed';
+export type DeliveryResult = 'sent' | 'skipped' | 'cancelled' | 'missing' | 'already_processed';
+
+// Labels for the Done and Snooze buttons on a reminder, in the person's
+// language. The reminder text itself is still English only.
+const ACTION_LABELS: Record<string, PushActions['labels']> = {
+  en: { done: 'Done', snooze: 'Snooze 15 min' },
+  hi: { done: 'हो गया', snooze: '15 मिनट बाद' },
+};
+
+/** The local date a reminder is about: occurrence keys start with it, except weekly quotas ('2026-W47'). */
+function occurrenceDate(occurrenceKey: string): string | null {
+  return /^\d{4}-\d{2}-\d{2}/.exec(occurrenceKey)?.[0] ?? null;
+}
 
 interface Pending {
   id: string;
   kind: string;
+  taskId: string | null;
+  occurrenceKey: string;
+  locale: string;
   createdAt: Date;
   userId: string;
   title: string;
@@ -37,11 +52,28 @@ export class DeliveryService {
    */
   async deliver(notificationId: string): Promise<DeliveryResult> {
     const [n] = await this.sql<Pending[]>`
-      select n.id, n.kind, n.created_at, n.user_id, n.title, n.body, n.url, n.status, u.email, u.notify_push, u.notify_email
+      select n.id, n.kind, n.task_id, n.occurrence_key, n.created_at, n.user_id, n.title, n.body, n.url, n.status,
+             u.email, u.locale, u.notify_push, u.notify_email
       from notifications n join users u on u.id = n.user_id
       where n.id = ${notificationId}`;
     if (!n) return 'missing';
     if (n.status !== 'queued') return 'already_processed';
+
+    // Ticked off while the reminder waited (in the queue, or snoozed): a
+    // reminder now would be noise. Weekly quotas have no single date to check.
+    const date = n.taskId ? occurrenceDate(n.occurrenceKey) : null;
+    if (n.taskId && date) {
+      const [done] = await this.sql`select 1 from task_completions where task_id = ${n.taskId} and occurrence_date = ${date}`;
+      if (done) {
+        await this.sql`update notifications set status = 'cancelled', sent_at = now() where id = ${n.id} and status = 'queued'`;
+        notificationDeliveries.inc({ channel: 'all', result: 'cancelled' });
+        return 'cancelled';
+      }
+    }
+    // Reminders about a task get Done and Snooze buttons.
+    const actions: PushActions | undefined = n.taskId
+      ? { taskId: n.taskId, date, labels: ACTION_LABELS[n.locale] ?? ACTION_LABELS.en! }
+      : undefined;
 
     const used = new Set<string>();
     const errors: string[] = [];
@@ -51,7 +83,7 @@ export class DeliveryService {
         select id, endpoint, p256dh, auth from push_subscriptions where user_id = ${n.userId}`;
       for (const target of targets) {
         try {
-          await sendPush(target, n);
+          await sendPush(target, n, actions);
           used.add('push');
           notificationDeliveries.inc({ channel: 'push', result: 'sent' });
         } catch (err) {

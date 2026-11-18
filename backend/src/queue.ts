@@ -34,10 +34,10 @@ export function notificationsQueue(): Queue<DeliverJob> {
 /**
  * The notification row is the source of truth (an outbox); the job only points
  * at it. Using the row id as the job id means adding the same notification
- * twice creates one job.
+ * twice creates one job. delayMs holds a snoozed reminder back until it's due.
  */
-export async function enqueueNotification(notificationId: string): Promise<void> {
-  await notificationsQueue().add('deliver', { notificationId }, { jobId: notificationId });
+export async function enqueueNotification(notificationId: string, delayMs = 0): Promise<void> {
+  await notificationsQueue().add('deliver', { notificationId }, { jobId: notificationId, ...(delayMs > 0 ? { delay: delayMs } : {}) });
 }
 
 export async function closeQueue(): Promise<void> {

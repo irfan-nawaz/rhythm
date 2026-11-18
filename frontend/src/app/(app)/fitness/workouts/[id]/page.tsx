@@ -12,7 +12,7 @@ import { BusyButton, ErrorNote, FormField, Loading } from '@/components/kit';
 import { useMe } from '@/components/me';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { api, errorMessage, type Exercise, type WorkoutSet } from '@/lib/api';
+import { api, errorMessage, type Exercise, type Ticked, type WorkoutSet } from '@/lib/api';
 import { formatDateTime, formatDuration } from '@/lib/time';
 
 interface WorkoutDetail {
@@ -23,6 +23,7 @@ interface WorkoutDetail {
 export default function WorkoutPage() {
   const t = useTranslations('workout');
   const tNav = useTranslations('nav');
+  const tToday = useTranslations('today');
   const locale = useLocale();
   const { id } = useParams<{ id: string }>();
   const me = useMe();
@@ -40,8 +41,16 @@ export default function WorkoutPage() {
   };
 
   const addSet = useMutation({
-    mutationFn: (body: Record<string, unknown>) => api.post(`/api/workouts/${id}/sets`, body),
-    onSuccess: refresh,
+    mutationFn: (body: Record<string, unknown>) => api.post<{ ticked: Ticked[] }>(`/api/workouts/${id}/sets`, body),
+    onSuccess: ({ ticked }) => {
+      // The first set ticks off a Gym task linked to workouts.
+      if (ticked.length > 0) {
+        toast.success(tToday('tickedOff', { titles: ticked.map((x) => x.title).join(', ') }));
+        queryClient.invalidateQueries({ queryKey: ['today'] });
+        queryClient.invalidateQueries({ queryKey: ['calendar'] });
+      }
+      refresh();
+    },
     onError: (err) => setError(errorMessage(err)),
   });
   const deleteSet = useMutation({

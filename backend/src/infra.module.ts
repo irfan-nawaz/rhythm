@@ -26,8 +26,8 @@ export class CacheService {
 
 @Injectable()
 export class QueueService {
-  enqueueNotification(notificationId: string): Promise<void> {
-    return enqueueNotification(notificationId);
+  enqueueNotification(notificationId: string, delayMs = 0): Promise<void> {
+    return enqueueNotification(notificationId, delayMs);
   }
 }
 

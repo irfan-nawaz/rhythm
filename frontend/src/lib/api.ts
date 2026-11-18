@@ -17,7 +17,10 @@ export interface Me {
 }
 
 export type Status = 'pending' | 'due' | 'overdue' | 'done';
-export type ScheduleType = 'daily' | 'weekly' | 'weekly_quota';
+export type ScheduleType = 'daily' | 'weekly' | 'weekly_quota' | 'once' | 'monthly' | 'yearly' | 'every_n_days' | 'after_done';
+export type Meal = 'breakfast' | 'lunch' | 'dinner' | 'snack';
+/** Logging this meal, or a workout, ticks the task off. */
+export type AutoComplete = Meal | 'workout';
 
 export interface TodayItem {
   id: string;
@@ -27,6 +30,11 @@ export interface TodayItem {
   groupKind: 'personal' | 'shared';
   scheduleType: ScheduleType;
   dueTime: string;
+  /** The day it was due. Earlier than the viewed day for a bill or one-off that's still waiting. */
+  dueDate: string;
+  /** The day a tick counts for: send this when ticking or unticking. */
+  occurrenceDate: string;
+  autoComplete: AutoComplete | null;
   assigneeName: string | null;
   completedAt: string | null;
   streak: number;
@@ -85,11 +93,64 @@ export interface Task {
   timesPerWeek: number | null;
   graceMinutes: number;
   notify: boolean;
+  /** Also a heads-up at the due time, not only once it's late. */
+  remindAtDue: boolean;
+  /** once: the date. every_n_days: the first date. after_done: when it's first due. */
+  startDate: string | null;
+  intervalDays: number | null;
+  /** monthly and yearly; 31 means the last day of a shorter month. */
+  dayOfMonth: number | null;
+  monthOfYear: number | null;
+  /** Tell this member if it's still not done escalateAfterMinutes after the reminder. */
+  escalateMemberId: string | null;
+  escalateAfterMinutes: number;
+  escalateName: string | null;
+  autoComplete: AutoComplete | null;
   active: boolean;
   assigneeMemberId: string | null;
   groupName: string;
   groupKind: 'personal' | 'shared';
   assigneeName: string | null;
+}
+
+/** done: ticked. late: a bill or one-off ticked after its day. missed: its day passed. open: still to do. upcoming: still to come. */
+export type CellState = 'done' | 'late' | 'missed' | 'open' | 'upcoming';
+
+export interface CalendarTask {
+  id: string;
+  title: string;
+  emoji: string | null;
+  groupName: string;
+  groupKind: 'personal' | 'shared';
+  scheduleType: ScheduleType;
+  dueTime: string;
+  daysOfWeek: number[] | null;
+  timesPerWeek: number | null;
+  intervalDays: number | null;
+  assigneeName: string | null;
+}
+
+/** GET /api/calendar?from&to: the week, month and year views. */
+export interface CalendarResponse {
+  from: string;
+  to: string;
+  today: string;
+  tasks: CalendarTask[];
+  /** Every day in the range; weekly quotas aren't counted per day. */
+  days: { date: string; scheduled: number; done: number }[];
+  /** Per task, per day; only for ranges up to 42 days. */
+  cells?: Record<string, Record<string, CellState>>;
+  weeks: { taskId: string; weekStart: string; count: number; target: number; state: 'met' | 'missed' | 'open' | 'upcoming' }[];
+  /** One-offs, monthly and yearly dates, and anything every two weeks or less often. */
+  dated: { taskId: string; date: string; state: CellState }[];
+  /** Per task: occurrences whose day has passed (or done today), and how many were done. */
+  stats: { taskId: string; due: number; done: number }[];
+}
+
+/** What logging a meal or a set ticked off on Today. */
+export interface Ticked {
+  taskId: string;
+  title: string;
 }
 
 export type ExerciseKind = 'weight_reps' | 'bodyweight_reps' | 'duration' | 'distance_duration';
@@ -139,8 +200,6 @@ export interface Food {
   lastQuantityG?: number;
 }
 
-export type Meal = 'breakfast' | 'lunch' | 'dinner' | 'snack';
-
 export interface FoodEntry {
   id: string;
   foodName: string;
@@ -157,7 +216,7 @@ export interface AppNotification {
   kind: string;
   title: string;
   body: string;
-  status: 'queued' | 'sent' | 'skipped' | 'failed';
+  status: 'queued' | 'sent' | 'skipped' | 'failed' | 'cancelled';
   channels: ('push' | 'email' | 'webhook')[];
   error: string | null;
   createdAt: string;
@@ -205,6 +264,26 @@ export interface Webhook {
   lastStatus: number | null;
   lastDeliveryAt: string | null;
   secret?: string;
+}
+
+/** An invite link that still works. The link itself is shown once, when it's made. */
+export interface Invite {
+  id: string;
+  /** Set: the link lets this managed member sign in on their own phone. */
+  memberId: string | null;
+  memberName?: string | null;
+  uses: number;
+  maxUses: number;
+  expiresAt: string;
+  createdAt: string;
+}
+
+/** What /join/[token] shows before you accept. */
+export interface InvitePreview {
+  invite: { groupName: string; memberName: string | null; invitedBy: string | null; expiresAt: string };
+  signedIn: boolean;
+  alreadyMember: boolean;
+  groupId: string | null;
 }
 
 /**

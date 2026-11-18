@@ -66,7 +66,25 @@
     "emptyBody": "सुबह से रात तक का एक तैयार रूटीन जोड़ें और उसे बदलें, या अपना ख़ुद का बनाएँ।",
     "addStarter": "तैयार रूटीन जोड़ें",
     "createTask": "काम बनाएँ",
-    "addedStarter": "आपके दिन में {count} काम जोड़े गए"
+    "addedStarter": "आपके दिन में {count} काम जोड़े गए",
+    "stillToDo": "अभी बाकी",
+    "dueOn": "{date} को करना था",
+    "tickedOff": "{titles} पूरा हुआ"
+  },
+  "views": {
+    "label": "दृश्य",
+    "day": "दिन",
+    "week": "हफ़्ता",
+    "month": "महीना",
+    "year": "साल",
+    "state": {
+      "done": "हो गया",
+      "late": "देर से हुआ",
+      "missed": "छूट गया",
+      "open": "बाकी",
+      "overdue": "देर हो गई",
+      "upcoming": "आने वाला"
+    }
   },
   "settings": {
     "title": "सेटिंग्स",

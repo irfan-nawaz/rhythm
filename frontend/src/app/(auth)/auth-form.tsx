@@ -1,5 +1,6 @@
 'use client';
 
+import { useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -8,9 +9,11 @@ import { BusyButton, FormField } from '@/components/kit';
 import { Input } from '@/components/ui/input';
 import { api, errorMessage } from '@/lib/api';
 
-export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
+/** next: a same-site path to return to afterwards, such as an invite link (already checked by safeNext). */
+export function AuthForm({ mode, next }: { mode: 'login' | 'register'; next?: string }) {
   const t = useTranslations();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,7 +33,9 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
       } else {
         await api.post('/api/auth/login', { email: form.get('email'), password: form.get('password') });
       }
-      router.replace('/today');
+      // Nothing fetched while signed out (or as someone else) may be shown now.
+      queryClient.clear();
+      router.replace(next ?? '/today');
       router.refresh();
     } catch (err) {
       setError(errorMessage(err, t('common.offline')));
@@ -73,7 +78,10 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
       </form>
       <p className="mt-8 text-muted-foreground">
         {mode === 'login' ? t('auth.newHere') : t('auth.haveAccount')}{' '}
-        <Link href={mode === 'login' ? '/register' : '/login'} className="font-semibold text-foreground underline">
+        <Link
+          href={`${mode === 'login' ? '/register' : '/login'}${next ? `?next=${encodeURIComponent(next)}` : ''}`}
+          className="font-semibold text-foreground underline"
+        >
           {mode === 'login' ? t('auth.createAnAccount') : t('auth.signIn')}
         </Link>
       </p>

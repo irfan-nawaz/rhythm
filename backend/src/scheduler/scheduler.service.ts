@@ -4,7 +4,14 @@ import type { Sql } from '../db.js';
 import { QueueService, SQL } from '../infra.module.js';
 import { logger } from '../logger.js';
 import { schedulerTickDuration } from '../metrics.js';
-import { checkDueTasks, deleteExpiredSessions, findStuckNotifications } from './due-tasks.js';
+import {
+  checkDueNudges,
+  checkDueTasks,
+  checkEscalations,
+  deleteExpiredSessions,
+  findStuckNotifications,
+  type CheckResult,
+} from './due-tasks.js';
 
 const MAX_BATCHES_PER_TICK = 20;
 const SESSION_CLEANUP_EVERY_MS = 3600_000;
@@ -57,12 +64,21 @@ export class SchedulerService implements OnApplicationBootstrap, BeforeApplicati
     try {
       let checked = 0;
       let notified = 0;
-      for (let batch = 0; batch < MAX_BATCHES_PER_TICK && !this.stopping; batch += 1) {
-        const result = await checkDueTasks(this.sql, config.SCHEDULER_BATCH_SIZE, config.NOTIFY_MAX_LATENESS_MINUTES);
-        checked += result.checked;
-        notified += result.notificationIds.length;
-        await this.enqueue(result.notificationIds);
-        if (result.checked < config.SCHEDULER_BATCH_SIZE) break; // backlog drained
+      // Heads-ups at the due time, then overdue checks, then escalations. Each
+      // drains its backlog in batches, up to a limit per tick.
+      const passes: (() => Promise<CheckResult>)[] = [
+        () => checkDueNudges(this.sql, config.SCHEDULER_BATCH_SIZE),
+        () => checkDueTasks(this.sql, config.SCHEDULER_BATCH_SIZE, config.NOTIFY_MAX_LATENESS_MINUTES),
+        () => checkEscalations(this.sql, config.SCHEDULER_BATCH_SIZE, config.NOTIFY_MAX_LATENESS_MINUTES),
+      ];
+      for (const pass of passes) {
+        for (let batch = 0; batch < MAX_BATCHES_PER_TICK && !this.stopping; batch += 1) {
+          const result = await pass();
+          checked += result.checked;
+          notified += result.notificationIds.length;
+          await this.enqueue(result.notificationIds);
+          if (result.checked < config.SCHEDULER_BATCH_SIZE) break; // backlog drained
+        }
       }
       await this.enqueue(await findStuckNotifications(this.sql));
 

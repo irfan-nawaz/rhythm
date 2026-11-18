@@ -25,6 +25,10 @@ export interface VisibleTask {
   dueTime: string;
   timesPerWeek: number | null;
   graceMinutes: number;
+  startDate: string | null;
+  intervalDays: number | null;
+  dayOfMonth: number | null;
+  monthOfYear: number | null;
   notify: boolean;
   active: boolean;
   assigneeMemberId: string | null;
@@ -56,7 +60,8 @@ export class AccessService {
   async requireTask(userId: string, taskId: string): Promise<VisibleTask> {
     const [task] = await this.sql<VisibleTask[]>`
       select t.id, t.group_id, g.timezone, t.title, t.schedule_type, t.days_of_week, t.due_time,
-             t.times_per_week, t.grace_minutes, t.notify, t.active, t.assignee_member_id,
+             t.times_per_week, t.grace_minutes, t.start_date, t.interval_days, t.day_of_month, t.month_of_year,
+             t.notify, t.active, t.assignee_member_id,
              me.id as my_member_id, me.role as my_role
       from tasks t
       join groups g on g.id = t.group_id

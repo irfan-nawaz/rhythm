@@ -4,14 +4,17 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft } from 'lucide-react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import { useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
+import { InviteShare } from '@/components/invite-share';
 import { BusyButton, ErrorNote, FormField, Loading, Segmented, Sheet } from '@/components/kit';
+import { useMe } from '@/components/me';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
-import { api, errorMessage, type Group, type Member } from '@/lib/api';
+import { api, errorMessage, type Group, type Invite, type Member } from '@/lib/api';
+import { formatDateTime } from '@/lib/time';
 
 interface GroupDetail {
   group: Group;
@@ -23,16 +26,47 @@ export default function GroupPage() {
   const tNav = useTranslations('nav');
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const locale = useLocale();
+  const me = useMe();
   const queryClient = useQueryClient();
   const [adding, setAdding] = useState(false);
-  const [mode, setMode] = useState<'child' | 'account'>('child');
+  const [mode, setMode] = useState<'link' | 'child' | 'account'>('link');
   const [error, setError] = useState<string | null>(null);
+  // A link is shown once, right after it's made (only its hash is stored).
+  const [groupLink, setGroupLink] = useState<string | null>(null);
+  const [memberLink, setMemberLink] = useState<{ name: string; url: string } | null>(null);
 
   const detail = useQuery({ queryKey: ['group', id], queryFn: () => api.get<GroupDetail>(`/api/groups/${id}`) });
+  const manages =
+    detail.data?.group.kind === 'shared' && (detail.data.group.role === 'owner' || detail.data.group.role === 'admin');
+  const invites = useQuery({
+    queryKey: ['invites', id],
+    queryFn: () => api.get<{ invites: Invite[] }>(`/api/groups/${id}/invites`),
+    enabled: manages,
+  });
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ['group', id] });
     queryClient.invalidateQueries({ queryKey: ['groups'] });
   };
+
+  const createLink = useMutation({
+    mutationFn: (member: Member | null) =>
+      api.post<{ invite: Invite; url: string }>(`/api/groups/${id}/invites`, member ? { memberId: member.id } : {}),
+    onSuccess: ({ url }, member) => {
+      if (member) setMemberLink({ name: member.name, url });
+      else setGroupLink(url);
+      queryClient.invalidateQueries({ queryKey: ['invites', id] });
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+  const turnOff = useMutation({
+    mutationFn: (inviteId: string) => api.del(`/api/groups/${id}/invites/${inviteId}`),
+    onSuccess: () => {
+      toast.success(t('turnedOff'));
+      queryClient.invalidateQueries({ queryKey: ['invites', id] });
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
 
   const addMember = useMutation({
     mutationFn: (body: { name?: string; email?: string; role: string }) => api.post(`/api/groups/${id}/members`, body),
@@ -72,6 +106,7 @@ export default function GroupPage() {
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (mode === 'link') return; // Enter in the link field: nothing to submit
     setError(null);
     const form = new FormData(event.currentTarget);
     addMember.mutate(mode === 'child' ? { name: String(form.get('name')), role: 'member' } : { email: String(form.get('email')), role: String(form.get('role')) });
@@ -99,7 +134,16 @@ export default function GroupPage() {
             {t('members')}
           </h2>
           {canManage && group.kind === 'shared' ? (
-            <Button size="sm" variant="secondary" onClick={() => setAdding(true)}>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                setMode('link');
+                setGroupLink(null);
+                setError(null);
+                setAdding(true);
+              }}
+            >
               {t('addSomeone')}
             </Button>
           ) : null}
@@ -116,6 +160,17 @@ export default function GroupPage() {
                   {m.hasAccount ? t(`roles.${m.role}`) : t('noAccount', { role: t(`roles.${m.role}`) })}
                 </span>
               </span>
+              {canManage && group.kind === 'shared' && !m.hasAccount ? (
+                <BusyButton
+                  size="sm"
+                  variant="secondary"
+                  aria-label={t('inviteMemberLabel', { name: m.name })}
+                  busy={createLink.isPending && createLink.variables?.id === m.id}
+                  onClick={() => createLink.mutate(m)}
+                >
+                  {t('inviteMember')}
+                </BusyButton>
+              ) : null}
               {group.kind === 'shared' && m.role !== 'owner' && (canManage || m.isYou) ? (
                 <Button size="sm" variant="ghost" className="text-destructive" onClick={() => removeMember.mutate(m.id)}>
                   {m.isYou ? t('leave') : t('remove')}
@@ -125,6 +180,31 @@ export default function GroupPage() {
           ))}
         </ul>
       </section>
+
+      {invites.data && invites.data.invites.length > 0 ? (
+        <section aria-labelledby="links" className="mb-8">
+          <h2 id="links" className="mb-2 font-bold text-muted-foreground">
+            {t('links')}
+          </h2>
+          <ul className="divide-y">
+            {invites.data.invites.map((invite) => (
+              <li key={invite.id} className="flex min-h-14 items-center gap-3 py-2">
+                <span className="min-w-0 flex-1">
+                  <span className="block font-semibold">
+                    {invite.memberId ? t('linkFor', { name: invite.memberName ?? '' }) : t('linkAnyone', { uses: invite.uses, max: invite.maxUses })}
+                  </span>
+                  <span className="block text-sm text-muted-foreground">
+                    {t('linkExpires', { date: formatDateTime(invite.expiresAt, me.timezone, locale) })}
+                  </span>
+                </span>
+                <BusyButton size="sm" variant="ghost" busy={turnOff.isPending && turnOff.variables === invite.id} onClick={() => turnOff.mutate(invite.id)}>
+                  {t('turnOff')}
+                </BusyButton>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {group.kind === 'shared' ? (
         <section className="mb-8 rounded-2xl bg-muted p-4">
@@ -149,11 +229,23 @@ export default function GroupPage() {
             value={mode}
             onChange={setMode}
             options={[
+              { value: 'link', label: t('linkOption') },
               { value: 'child', label: t('noAccountOption') },
               { value: 'account', label: t('hasAccountOption') },
             ]}
           />
-          {mode === 'child' ? (
+          {mode === 'link' ? (
+            <>
+              <p className="text-muted-foreground">{t('linkHint', { group: group.name })}</p>
+              {groupLink ? (
+                <InviteShare url={groupLink} text={t('shareText', { group: group.name, url: groupLink })} />
+              ) : (
+                <BusyButton type="button" className="self-start" busy={createLink.isPending} onClick={() => createLink.mutate(null)}>
+                  {t('createLink')}
+                </BusyButton>
+              )}
+            </>
+          ) : mode === 'child' ? (
             <FormField label={t('name')} hint={t('childHint')}>
               {(fid) => <Input id={fid} name="name" required maxLength={60} />}
             </FormField>
@@ -173,10 +265,21 @@ export default function GroupPage() {
             </>
           )}
           {error ? <p className="text-destructive">{error}</p> : null}
-          <BusyButton type="submit" busy={addMember.isPending} className="self-end">
-            {t('addToGroup')}
-          </BusyButton>
+          {mode !== 'link' ? (
+            <BusyButton type="submit" busy={addMember.isPending} className="self-end">
+              {t('addToGroup')}
+            </BusyButton>
+          ) : null}
         </form>
+      </Sheet>
+
+      <Sheet
+        open={memberLink !== null}
+        onOpenChange={(open) => !open && setMemberLink(null)}
+        title={memberLink ? t('inviteMemberTitle', { name: memberLink.name }) : ''}
+        description={memberLink ? t('inviteMemberHint', { name: memberLink.name }) : undefined}
+      >
+        {memberLink ? <InviteShare url={memberLink.url} text={t('shareMemberText', { url: memberLink.url })} /> : null}
       </Sheet>
     </>
   );

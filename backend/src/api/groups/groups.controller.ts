@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post } from '@nestjs/common';
 import { z } from 'zod';
 import type { Sql } from '../../db.js';
-import { isValidTimezone } from '../../domain/schedule.js';
+import { isValidTimezone, todayIn } from '../../domain/schedule.js';
 import { starterPacks } from '../../domain/starter.js';
 import { createTask, normalizeTask, recomputeGroupDeadlines, taskFields } from '../../domain/tasks.js';
 import { SQL } from '../../infra.module.js';
@@ -93,7 +93,7 @@ export class GroupsController {
     const [group] = await this.sql`
       update groups set name = coalesce(${body.name ?? null}, name), timezone = coalesce(${body.timezone ?? null}, timezone)
       where id = ${id} returning id, name, kind, timezone`;
-    if (body.timezone && body.timezone !== me.timezone) await recomputeGroupDeadlines(this.sql, id, body.timezone);
+    if (body.timezone && body.timezone !== me.timezone) await recomputeGroupDeadlines(this.sql, id);
     return { group };
   }
 
@@ -172,7 +172,7 @@ export class GroupsController {
     let added = 0;
     for (const starter of starterPacks[body.pack]) {
       if (existing.has(starter.title.toLowerCase())) continue;
-      await createTask(this.sql, id, me.timezone, user.id, normalizeTask(taskFields.parse(starter)));
+      await createTask(this.sql, id, me.timezone, user.id, normalizeTask(taskFields.parse(starter), todayIn(me.timezone)));
       added += 1;
     }
     if (added > 0) void this.live.publishToGroup(id, { type: 'task.changed' });

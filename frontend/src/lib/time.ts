@@ -118,3 +118,54 @@ export function weekdayNames(locale: string): Weekday[] {
     return { value: i + 1, narrow: name('narrow'), short: name('short'), long: name('long') };
   });
 }
+
+/** ISO weekday of a date, 1 = Monday ... 7 = Sunday. */
+export function weekdayOf(date: string): number {
+  const day = noonUtc(date).getUTCDay();
+  return day === 0 ? 7 : day;
+}
+
+/** Monday of the week containing a date. */
+export function mondayOf(date: string): string {
+  return addDays(date, 1 - weekdayOf(date));
+}
+
+export function monthStart(date: string): string {
+  return `${date.slice(0, 7)}-01`;
+}
+
+export function monthEnd(date: string): string {
+  const [year, month] = date.split('-').map(Number);
+  return new Date(Date.UTC(year!, month!, 0, 12)).toISOString().slice(0, 10);
+}
+
+/** The first of the month `months` away from the month containing `date`. */
+export function addMonths(date: string, months: number): string {
+  const [year, month] = date.split('-').map(Number);
+  return new Date(Date.UTC(year!, month! - 1 + months, 1, 12)).toISOString().slice(0, 10);
+}
+
+/** "November 2026", "Nov", "17 November", in the chosen language. */
+export function formatMonth(date: string, locale: string, style: 'long' | 'short' = 'long', withYear = true): string {
+  return new Intl.DateTimeFormat(locale, { timeZone: 'UTC', month: style, ...(withYear ? { year: 'numeric' } : {}) }).format(noonUtc(date));
+}
+
+export function formatDayMonth(date: string, locale: string, month: 'long' | 'short' = 'short'): string {
+  return new Intl.DateTimeFormat(locale, { timeZone: 'UTC', day: 'numeric', month }).format(noonUtc(date));
+}
+
+/** A ?date= value, if it's a real YYYY-MM-DD date. */
+export function parseDateParam(value: string | string[] | undefined): string | null {
+  const date = Array.isArray(value) ? value[0] : value;
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  return noonUtc(date).toISOString().startsWith(date) ? date : null;
+}
+
+/**
+ * "Nov 16 – Nov 22": a span of days. Built from two dates rather than
+ * Intl's formatRange, whose output differs between Node and browsers and
+ * would make the server-rendered text disagree with the page.
+ */
+export function formatRange(from: string, to: string, locale: string): string {
+  return `${formatDayMonth(from, locale)} – ${formatDayMonth(to, locale)}`;
+}

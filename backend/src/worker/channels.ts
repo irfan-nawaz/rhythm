@@ -20,10 +20,39 @@ export interface Message {
   url: string;
 }
 
-export async function sendPush(target: PushTarget, message: Message): Promise<void> {
+/** What a reminder's buttons act on, and their labels. Absent for other notifications. */
+export interface PushActions {
+  taskId: string;
+  /** The occurrence the reminder is about; null means today (weekly quotas). */
+  date: string | null;
+  labels: { done: string; snooze: string };
+}
+
+/**
+ * What the service worker (frontend/public/sw.js) receives. tag is the
+ * notification id, so a retried delivery replaces the first one.
+ */
+export function pushPayload(message: Message, actions?: PushActions) {
+  return {
+    title: message.title,
+    body: message.body,
+    url: message.url,
+    tag: message.id,
+    ...(actions && {
+      taskId: actions.taskId,
+      date: actions.date,
+      actions: [
+        { action: 'done', title: actions.labels.done },
+        { action: 'snooze', title: actions.labels.snooze },
+      ],
+    }),
+  };
+}
+
+export async function sendPush(target: PushTarget, message: Message, actions?: PushActions): Promise<void> {
   await sendNotification(
     { endpoint: target.endpoint, keys: { p256dh: target.p256dh, auth: target.auth } },
-    JSON.stringify({ title: message.title, body: message.body, url: message.url, tag: message.id }),
+    JSON.stringify(pushPayload(message, actions)),
     {
       TTL: 3600, // drop it if the phone stays offline for more than an hour
       timeout: 10_000,

@@ -1,11 +1,14 @@
 import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Patch, Post, Query } from '@nestjs/common';
 import { z } from 'zod';
 import type { Sql } from '../../db.js';
+import { DateTime } from 'luxon';
+import { autoComplete } from '../../domain/auto-complete.js';
 import { CacheService, SQL } from '../../infra.module.js';
 import { CurrentUser } from '../common/auth.js';
 import { badRequest, notFound } from '../common/errors.js';
 import type { SessionUser } from '../common/session.js';
 import { uuid } from '../common/validation.js';
+import { LiveService } from '../live/live.js';
 
 const exerciseBody = z.object({
   name: z.string().trim().min(1).max(80),
@@ -46,6 +49,7 @@ export class FitnessController {
   constructor(
     @Inject(SQL) private readonly sql: Sql,
     private readonly cache: CacheService,
+    private readonly live: LiveService,
   ) {}
 
   private async requireWorkout(userId: string, workoutId: string) {
@@ -181,7 +185,7 @@ export class FitnessController {
 
   @Post('workouts/:id/sets')
   async addSet(@CurrentUser() user: SessionUser, @Param('id', { schema: uuid }) id: string, @Body({ schema: setBody }) body: z.infer<typeof setBody>) {
-    await this.requireWorkout(user.id, id);
+    const workout = await this.requireWorkout(user.id, id);
     await this.requireExercise(user.id, body.exerciseId);
     const [set] = await this.sql`
       insert into workout_sets (workout_id, exercise_id, position, reps, weight_kg, duration_sec, distance_m, rpe)
@@ -189,7 +193,16 @@ export class FitnessController {
               (select coalesce(max(position), 0) + 1 from workout_sets where workout_id = ${id}),
               ${body.reps ?? null}, ${body.weightKg ?? null}, ${body.durationSec ?? null}, ${body.distanceM ?? null}, ${body.rpe ?? null})
       returning *`;
-    return { set };
+    // The first set makes it a real workout: tick off a "Gym" task linked to
+    // workouts, for the day the workout started (see domain/auto-complete.ts).
+    let ticked: { taskId: string; title: string }[] = [];
+    if (set.position === 1) {
+      const day = DateTime.fromJSDate(workout.startedAt, { zone: user.timezone }).toISODate() as string;
+      const done = await autoComplete(this.sql, user.id, 'workout', day);
+      for (const t of done) void this.live.publishToGroup(t.groupId, { type: 'task.changed', taskId: t.taskId });
+      ticked = done.map(({ taskId, title }) => ({ taskId, title }));
+    }
+    return { set, ticked };
   }
 
   @Patch('workouts/:id/sets/:setId')

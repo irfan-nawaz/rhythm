@@ -40,16 +40,30 @@ rhythm/
 ## Features
 
 - **Today**: the day as a timeline, with each task due at its time. Overdue
-  tasks turn turmeric; the header follows the real sky.
-- **Tasks**: daily tasks, specific weekdays ("Tue and Fri"), or a number of
-  times a week ("clean the bathroom twice a week").
+  tasks turn turmeric; the header follows the real sky. Bills and one-offs
+  that are still waiting stay at the top until they're done.
+- **Week, month and year**: the same tasks from further away. A week grid of
+  what got done each day, a month calendar coloured by how much got done with
+  bills and birthdays on their dates, and a year of small heatmaps with how
+  often each task got done.
+- **Tasks**: daily, on chosen weekdays ("Tue and Fri"), a number of times a
+  week ("clean the bathroom twice a week"), every N days ("water filter every
+  90 days"), N days after it was last done ("change the bedsheets 7 days
+  after"), monthly ("rent on the 1st"), yearly (birthdays) or once.
 - **Family groups**: a personal group plus shared ones (home, parents).
-  Members can have accounts, or be managed by you (children).
+  Members can have accounts, or be managed by you (children). Invite people
+  with a link you can send on WhatsApp; someone you set up yourself, such as
+  a parent, can take over their own tasks on their own phone the same way.
 - **Reminders**: push, email and webhooks (Slack, Discord, Home Assistant)
-  when a task isn't done in time.
+  when a task isn't done in time, and an optional heads-up when it's due. On
+  Android and desktop, the notification has Done and Snooze buttons. If it's
+  still not done a while later, Rhythm can tell someone else: "if Papa hasn't
+  taken his BP tablet by 9:30, tell me".
 - **Fitness**: workouts, sets, records and an estimated 1-rep max trend.
 - **Food**: a catalogue of Indian and everyday foods, custom foods, meals,
   macros against daily goals.
+- **Log once**: logging lunch on Food, or a workout on Fitness, ticks off the
+  Lunch or Gym task on Today.
 - **Themes**: light, dark, kids (brighter, rounder, bigger) and large text
   (for parents and grandparents). Saved per account.
 - **Languages**: English and Hindi. Missing translations fall back to English.
@@ -79,7 +93,9 @@ npm run dev
 ```
 
 Open http://localhost:3000 and sign in as `demo@rhythm.local` with password
-`rhythm-demo`, or create an account. Emails land in Mailpit at
+`rhythm-demo`, or create an account. The demo has six weeks of history and an
+example of each kind of schedule. `papa@rhythm.local` (same password) is Papa,
+whose BP tablet tells Demo when it's missed. Emails land in Mailpit at
 http://localhost:8025.
 
 | URL | What |

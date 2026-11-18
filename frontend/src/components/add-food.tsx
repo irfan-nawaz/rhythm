@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import { BusyButton, FormField, Loading, Sheet } from '@/components/kit';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { api, errorMessage, type Food, type Meal } from '@/lib/api';
+import { api, errorMessage, type Food, type Meal, type Ticked } from '@/lib/api';
 
 type Step = 'search' | 'amount' | 'custom';
 
@@ -15,6 +15,7 @@ const round1 = (n: number) => Math.round(n * 10) / 10;
 
 export function AddFood({ open, onOpenChange, meal, date }: { open: boolean; onOpenChange: (open: boolean) => void; meal: Meal; date: string }) {
   const t = useTranslations('food');
+  const tToday = useTranslations('today');
   const queryClient = useQueryClient();
   const [step, setStep] = useState<Step>('search');
   const [query, setQuery] = useState('');
@@ -41,9 +42,15 @@ export function AddFood({ open, onOpenChange, meal, date }: { open: boolean; onO
   });
 
   const add = useMutation({
-    mutationFn: () => api.post('/api/nutrition/entries', { foodId: food!.id, meal, date, quantityG: Number(grams) }),
-    onSuccess: () => {
-      toast.success(t('added', { meal: mealName }));
+    mutationFn: () => api.post<{ ticked: Ticked[] }>('/api/nutrition/entries', { foodId: food!.id, meal, date, quantityG: Number(grams) }),
+    onSuccess: ({ ticked }) => {
+      // Logging lunch also ticks off a Lunch task linked to it.
+      const titles = ticked.map((x) => x.title).join(', ');
+      toast.success(t('added', { meal: mealName }), { description: ticked.length > 0 ? tToday('tickedOff', { titles }) : undefined });
+      if (ticked.length > 0) {
+        queryClient.invalidateQueries({ queryKey: ['today'] });
+        queryClient.invalidateQueries({ queryKey: ['calendar'] });
+      }
       queryClient.invalidateQueries({ queryKey: ['nutrition'] });
       queryClient.invalidateQueries({ queryKey: ['foods', 'recent'] });
       onOpenChange(false);

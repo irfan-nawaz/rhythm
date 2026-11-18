@@ -1,12 +1,14 @@
 import { Body, Controller, Delete, Get, HttpCode, Inject, Param, Post, Query } from '@nestjs/common';
 import { z } from 'zod';
 import type { Sql } from '../../db.js';
+import { autoComplete } from '../../domain/auto-complete.js';
 import { addDays, todayIn } from '../../domain/schedule.js';
 import { CacheService, SQL } from '../../infra.module.js';
 import { CurrentUser } from '../common/auth.js';
 import { badRequest, notFound } from '../common/errors.js';
 import type { SessionUser } from '../common/session.js';
 import { isoDate, likePattern, uuid } from '../common/validation.js';
+import { LiveService } from '../live/live.js';
 
 const per100 = z.number().min(0).max(1000);
 
@@ -43,6 +45,7 @@ export class NutritionController {
   constructor(
     @Inject(SQL) private readonly sql: Sql,
     private readonly cache: CacheService,
+    private readonly live: LiveService,
   ) {}
 
   private columns() {
@@ -149,12 +152,16 @@ export class NutritionController {
       select * from foods where id = ${body.foodId} and (owner_user_id is null or owner_user_id = ${user.id})`;
     if (!food) throw badRequest('Unknown food');
     const k = body.quantityG / 100;
+    const date = body.date ?? todayIn(user.timezone);
     const [entry] = await this.sql`
       insert into food_entries (user_id, food_id, food_name, eaten_on, meal, quantity_g, kcal, protein_g, carbs_g, fat_g)
-      values (${user.id}, ${food.id}, ${food.name}, ${body.date ?? todayIn(user.timezone)}, ${body.meal}, ${body.quantityG},
+      values (${user.id}, ${food.id}, ${food.name}, ${date}, ${body.meal}, ${body.quantityG},
               ${round(food.kcal * k)}, ${round(food.proteinG * k)}, ${round(food.carbsG * k)}, ${round(food.fatG * k)})
       returning id, food_id, food_name, eaten_on, meal, quantity_g, kcal, protein_g, carbs_g, fat_g, created_at`;
-    return { entry };
+    // Logging lunch ticks off a "Lunch" task linked to it (see domain/auto-complete.ts).
+    const ticked = await autoComplete(this.sql, user.id, body.meal, date);
+    for (const t of ticked) void this.live.publishToGroup(t.groupId, { type: 'task.changed', taskId: t.taskId });
+    return { entry, ticked: ticked.map(({ taskId, title }) => ({ taskId, title })) };
   }
 
   @Delete('nutrition/entries/:id')

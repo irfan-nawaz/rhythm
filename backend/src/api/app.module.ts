@@ -7,9 +7,11 @@ import { SessionGuard } from './common/auth.js';
 import { FitnessController } from './fitness/fitness.controller.js';
 import { GroupsController } from './groups/groups.controller.js';
 import { DrainState, HealthController } from './health/health.controller.js';
+import { GroupInvitesController, InvitesController } from './invites/invites.controller.js';
 import { MeController } from './me/me.controller.js';
 import { NotificationsController } from './notifications/notifications.controller.js';
 import { NutritionController } from './nutrition/nutrition.controller.js';
+import { CalendarController } from './tasks/calendar.controller.js';
 import { TasksController } from './tasks/tasks.controller.js';
 import { TasksService } from './tasks/tasks.service.js';
 import { LiveController, LiveService } from './live/live.js';
@@ -22,7 +24,10 @@ import { WebhooksController } from './webhooks/webhooks.controller.js';
     AuthController,
     MeController,
     GroupsController,
+    GroupInvitesController,
+    InvitesController,
     TasksController,
+    CalendarController,
     FitnessController,
     NutritionController,
     NotificationsController,

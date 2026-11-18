@@ -61,7 +61,7 @@ export class MeController {
         update groups set timezone = ${changes.timezone}
         where kind = 'personal' and id in (select group_id from members where user_id = ${user.id})
         returning id`;
-      for (const group of groups) await recomputeGroupDeadlines(this.sql, group.id, changes.timezone);
+      for (const group of groups) await recomputeGroupDeadlines(this.sql, group.id);
     }
     await this.cache.invalidate(userCacheKey(user.id));
     return { user: await this.profile(user.id) };

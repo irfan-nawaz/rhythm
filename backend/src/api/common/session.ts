@@ -28,7 +28,8 @@ declare module 'fastify' {
 export const SESSION_COOKIE = 'rhythm_sid';
 const CACHE_TTL_SECONDS = 300;
 
-const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
+/** Tokens (sessions, invite links) are stored only as their SHA-256. */
+export const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
 export const userCacheKey = (userId: string) => `user:${userId}`;
 
 export async function createSession(req: FastifyRequest, reply: FastifyReply, userId: string): Promise<void> {

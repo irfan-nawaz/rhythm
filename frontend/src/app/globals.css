@@ -41,6 +41,10 @@
   --color-late: var(--late);
   --color-late-soft: var(--late-soft);
   --color-late-ink: var(--late-ink);
+  --color-heat-1: var(--heat-1);
+  --color-heat-2: var(--heat-2);
+  --color-heat-3: var(--heat-3);
+  --color-heat-4: var(--heat-4);
   --color-carbs: var(--carbs);
   --color-protein: var(--protein);
   --color-fat: var(--fat);
@@ -89,6 +93,13 @@
   --carbs: #4c8fd9;
   --protein: #2f7d5b;
   --fat: #f2b705;
+  /* How much of a day got done, for the month and year views: one hue,
+     light to dark, steps checked for contrast. Steps 1-2 take foreground
+     text, 3-4 background text. Each theme has its own. */
+  --heat-1: #8dc2a7;
+  --heat-2: #63a283;
+  --heat-3: #2f7c5b;
+  --heat-4: #165b3f;
 
   --sky-dawn: #ffe1c4;
   --sky-day: #d6e8fd;
@@ -127,6 +138,11 @@
   --carbs: #7fb0ec;
   --protein: #5cc192;
   --fat: #f2b705;
+  /* Dark to light here: more done glows more. */
+  --heat-1: #1e5a40;
+  --heat-2: #317958;
+  --heat-3: #4eaa80;
+  --heat-4: #7dd7aa;
 
   --sky-dawn: #4a3328;
   --sky-day: #1d3557;
@@ -166,6 +182,10 @@
   --carbs: #3d8bff;
   --protein: #1f9d55;
   --fat: #ff8a3d;
+  --heat-1: #6ec889;
+  --heat-2: #3eaa65;
+  --heat-3: #088142;
+  --heat-4: #005d2d;
 
   --sky-dawn: #ffcf9e;
   --sky-day: #b8e0ff;
@@ -188,6 +208,10 @@
   --done: #1f6b4a;
   --late-ink: #5a3c00;
   --sky-ink: #0f1228;
+  --heat-1: #93c1a7;
+  --heat-2: #6aa084;
+  --heat-3: #347858;
+  --heat-4: #0c5538;
 }
 
 html {

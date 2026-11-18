@@ -1,14 +1,14 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { BellOff, Plus } from 'lucide-react';
+import { BellOff, BellRing, Dumbbell, Plus, UtensilsCrossed } from 'lucide-react';
 import { useLocale, useTranslations } from 'next-intl';
 import { useState } from 'react';
 import { EmptyState, ErrorNote, Loading, PageHeader } from '@/components/kit';
 import { TaskEditor } from '@/components/task-editor';
 import { Button } from '@/components/ui/button';
 import { api, errorMessage, type Group, type Task } from '@/lib/api';
-import { weekdayNames } from '@/lib/time';
+import { formatDay, formatDayMonth, weekdayNames } from '@/lib/time';
 import { cn } from '@/lib/utils';
 
 export default function TasksPage() {
@@ -27,7 +27,20 @@ export default function TasksPage() {
       const label = list.join() === '1,2,3,4,5' ? t('weekdays') : list.join() === '6,7' ? t('weekends') : list.map((d) => days[d - 1]?.short).join(', ');
       return t('onDays', { days: label, time: task.dueTime });
     }
-    return t('timesAWeek', { count: task.timesPerWeek ?? 1, day: days[(task.daysOfWeek?.[0] ?? 7) - 1]?.short ?? '', time: task.dueTime });
+    if (task.scheduleType === 'weekly_quota') {
+      return t('timesAWeek', { count: task.timesPerWeek ?? 1, day: days[(task.daysOfWeek?.[0] ?? 7) - 1]?.short ?? '', time: task.dueTime });
+    }
+    if (task.scheduleType === 'once') return t('onceOn', { date: formatDay(task.startDate ?? '', locale, 'short'), time: task.dueTime });
+    if (task.scheduleType === 'monthly') {
+      return task.dayOfMonth === 31 ? t('monthlyLast', { time: task.dueTime }) : t('monthlyOn', { day: task.dayOfMonth ?? 1, time: task.dueTime });
+    }
+    if (task.scheduleType === 'yearly') {
+      // 2028 is a leap year, so 29 February can be written out.
+      const date = `2028-${String(task.monthOfYear ?? 1).padStart(2, '0')}-${String(task.dayOfMonth ?? 1).padStart(2, '0')}`;
+      return t('yearlyOn', { date: formatDayMonth(date, locale, 'long'), time: task.dueTime });
+    }
+    if (task.scheduleType === 'every_n_days') return t('everyNDays', { count: task.intervalDays ?? 2, time: task.dueTime });
+    return t('afterDone', { count: task.intervalDays ?? 1, time: task.dueTime });
   }
 
   const openEditor = (task: Task | null) => {
@@ -82,6 +95,16 @@ export default function TasksPage() {
                       </span>
                     </span>
                     {!task.active ? <span className="text-sm font-semibold text-muted-foreground">{t('paused')}</span> : null}
+                    {task.active && task.autoComplete ? (
+                      task.autoComplete === 'workout' ? (
+                        <Dumbbell size={18} className="shrink-0 text-muted-foreground" aria-label={t('ticksWith', { thing: t('things.workout') })} />
+                      ) : (
+                        <UtensilsCrossed size={18} className="shrink-0 text-muted-foreground" aria-label={t('ticksWith', { thing: t(`things.${task.autoComplete}`) })} />
+                      )
+                    ) : null}
+                    {task.active && task.notify && task.escalateName ? (
+                      <BellRing size={18} className="shrink-0 text-muted-foreground" aria-label={t('tells', { name: task.escalateName })} />
+                    ) : null}
                     {task.active && !task.notify ? <BellOff size={18} className="text-muted-foreground" aria-label={t('noReminder')} /> : null}
                   </button>
                 </li>

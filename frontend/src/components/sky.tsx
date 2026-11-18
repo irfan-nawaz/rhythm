@@ -32,7 +32,7 @@ export function Sky({ timezone, date, today, name, beads }: { timezone: string; 
   const isToday = date === today;
 
   return (
-    <section aria-label={t('yourDay')} className={cn('sky -mx-4 rounded-b-[2rem] px-5 pt-8 pb-6 md:mx-0 md:mt-6 md:rounded-[2rem]', skyClass[phase])}>
+    <section aria-label={t('yourDay')} className={cn('sky mt-3 rounded-[2rem] px-5 pt-6 pb-6 md:mt-4', skyClass[phase])}>
       <p className="font-semibold opacity-80">{t(`greeting.${phase}`, { name: name.split(' ')[0] })}</p>
       <h1 className="mt-1 text-2xl font-bold">
         {isToday ? formatDay(date, locale) : `${relativeDay(date, today, locale)}, ${formatDay(date, locale)}`}

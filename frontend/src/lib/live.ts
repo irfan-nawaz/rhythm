@@ -20,7 +20,7 @@ export function useLiveUpdates(): void {
 
     const refresh = (...keys: string[]) => keys.forEach((key) => queryClient.invalidateQueries({ queryKey: [key] }));
 
-    source.addEventListener('task.changed', () => refresh('today', 'tasks'));
+    source.addEventListener('task.changed', () => refresh('today', 'tasks', 'calendar'));
     source.addEventListener('group.changed', () => refresh('groups', 'group', 'today'));
     source.addEventListener('notification', (event) => {
       try {

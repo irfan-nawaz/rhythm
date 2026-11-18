@@ -3,7 +3,8 @@ import { DateTime } from 'luxon';
 import { closeDb, sql } from '../db.js';
 import { logger } from '../logger.js';
 import { starterPacks } from '../domain/starter.js';
-import { createTask, normalizeTask, taskFields } from '../domain/tasks.js';
+import { addDays, scheduledBetween } from '../domain/schedule.js';
+import { createTask, normalizeTask, recomputeTaskTimes, taskFields } from '../domain/tasks.js';
 import { exercises } from './catalog/exercises.js';
 import { foods } from './catalog/foods.js';
 
@@ -13,6 +14,7 @@ import { foods } from './catalog/foods.js';
 const log = logger.child({ service: 'seed' });
 export const DEMO_EMAIL = 'demo@rhythm.local';
 export const DEMO_PASSWORD = 'rhythm-demo';
+export const PAPA_EMAIL = 'papa@rhythm.local';
 const TZ = 'Asia/Kolkata';
 
 async function seedCatalog(): Promise<void> {
@@ -36,6 +38,13 @@ async function seedCatalog(): Promise<void> {
   log.info({ exercises: exercises.length, foods: foods.length }, 'catalog seeded');
 }
 
+/** A pseudo-random number from 0 to 99 that depends only on the text, so the history has believable gaps. */
+function roll(text: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i += 1) h = Math.imul(h ^ text.charCodeAt(i), 16777619);
+  return (h >>> 0) % 100;
+}
+
 async function seedDemo(): Promise<void> {
   const [existing] = await sql`select id from users where lower(email) = ${DEMO_EMAIL}`;
   if (existing) {
@@ -44,48 +53,126 @@ async function seedDemo(): Promise<void> {
   }
 
   const passwordHash = await hash(DEMO_PASSWORD);
-  const { user, personal, home, kid } = await sql.begin(async (tx) => {
-    const [user] = await tx`
-      insert into users (email, password_hash, name, timezone, kcal_target, protein_target_g, carbs_target_g, fat_target_g)
-      values (${DEMO_EMAIL}, ${passwordHash}, 'Demo', ${TZ}, 2000, 130, 220, 65) returning id`;
-    const [personal] = await tx`
-      insert into groups (name, kind, timezone, created_by) values ('Personal', 'personal', ${TZ}, ${user.id}) returning id`;
-    await tx`insert into members (group_id, user_id, name, role) values (${personal.id}, ${user.id}, 'Demo', 'owner')`;
+  const today = DateTime.now().setZone(TZ).startOf('day');
+  const todayIso = today.toISODate() as string;
+  const ago = (days: number) => today.minus({ days }).toISODate() as string;
+
+  // Demo, plus Papa with his own account (his BP tablet tells Demo if it's
+  // missed), and Kiddo, a managed member without one.
+  const { user, papa, personal, home, me, papaMember, kid } = await sql.begin(async (tx) => {
+    const account = async (email: string, name: string, targets: number[] | null) => {
+      const [kcal = null, protein = null, carbs = null, fat = null] = targets ?? [];
+      const [u] = await tx`
+        insert into users (email, password_hash, name, timezone, kcal_target, protein_target_g, carbs_target_g, fat_target_g)
+        values (${email}, ${passwordHash}, ${name}, ${TZ}, ${kcal}, ${protein}, ${carbs}, ${fat}) returning id`;
+      const [g] = await tx`
+        insert into groups (name, kind, timezone, created_by) values ('Personal', 'personal', ${TZ}, ${u.id}) returning id`;
+      await tx`insert into members (group_id, user_id, name, role) values (${g.id}, ${u.id}, ${name}, 'owner')`;
+      return { user: u, personal: g };
+    };
+    const demo = await account(DEMO_EMAIL, 'Demo', [2000, 130, 220, 65]);
+    const papa = await account(PAPA_EMAIL, 'Papa', null);
     const [home] = await tx`
-      insert into groups (name, kind, timezone, created_by) values ('Home', 'shared', ${TZ}, ${user.id}) returning id`;
-    await tx`insert into members (group_id, user_id, name, role) values (${home.id}, ${user.id}, 'Demo', 'owner')`;
+      insert into groups (name, kind, timezone, created_by) values ('Home', 'shared', ${TZ}, ${demo.user.id}) returning id`;
+    const [me] = await tx`insert into members (group_id, user_id, name, role) values (${home.id}, ${demo.user.id}, 'Demo', 'owner') returning id`;
+    const [papaMember] = await tx`
+      insert into members (group_id, user_id, name, role) values (${home.id}, ${papa.user.id}, 'Papa', 'member') returning id`;
     const [kid] = await tx`insert into members (group_id, name, role) values (${home.id}, 'Kiddo', 'member') returning id`;
-    return { user, personal, home, kid };
+    return { user: demo.user, papa: papa.user, personal: demo.personal, home, me, papaMember, kid };
   });
 
-  const personalTasks = [];
-  for (const starter of starterPacks.personal) {
-    personalTasks.push(await createTask(sql, personal.id, TZ, user.id, normalizeTask(taskFields.parse(starter))));
-  }
-  for (const starter of starterPacks.home) {
-    await createTask(sql, home.id, TZ, user.id, normalizeTask(taskFields.parse(starter)));
-  }
-  await createTask(
-    sql,
-    home.id,
-    TZ,
-    user.id,
-    normalizeTask(taskFields.parse({ title: 'Brush teeth', emoji: '🪥', scheduleType: 'daily', dueTime: '07:30', assigneeMemberId: kid.id })),
-  );
+  const add = (groupId: string, fields: object) =>
+    createTask(sql, groupId, TZ, user.id, normalizeTask(taskFields.parse(fields), todayIso));
 
-  // About a week of history, with a few misses.
-  const today = DateTime.now().setZone(TZ).startOf('day');
-  for (let back = 1; back <= 7; back += 1) {
+  const personalTasks = [];
+  for (const starter of starterPacks.personal) personalTasks.push(await add(personal.id, starter));
+  const homeTasks = [];
+  for (const starter of starterPacks.home) homeTasks.push(await add(home.id, starter));
+  const kidBrush = await add(home.id, { title: 'Brush teeth', emoji: '🪥', scheduleType: 'daily', dueTime: '07:30', assigneeMemberId: kid.id });
+  const bpTablet = await add(home.id, {
+    title: 'BP tablet',
+    emoji: '💊',
+    scheduleType: 'daily',
+    dueTime: '09:00',
+    graceMinutes: 0,
+    assigneeMemberId: papaMember.id,
+    escalateMemberId: me.id,
+    escalateAfterMinutes: 30,
+  });
+
+  // One of each of the other schedules, with dates around today.
+  const birthday = today.plus({ days: 26 });
+  const rent = await add(home.id, { title: 'Pay rent', emoji: '🏠', scheduleType: 'monthly', dayOfMonth: 1, dueTime: '10:00', graceMinutes: 0, assigneeMemberId: me.id });
+  const power = await add(home.id, { title: 'Electricity bill', emoji: '💡', scheduleType: 'monthly', dayOfMonth: 10, dueTime: '18:00', graceMinutes: 0, assigneeMemberId: me.id });
+  const papasBirthday = await add(home.id, { title: "Papa's birthday", emoji: '🎂', scheduleType: 'yearly', monthOfYear: birthday.month, dayOfMonth: birthday.day, dueTime: '09:00', graceMinutes: 0 });
+  const insurance = await add(personal.id, { title: 'Renew car insurance', emoji: '🚗', scheduleType: 'once', startDate: ago(-10), dueTime: '12:00', graceMinutes: 0 });
+  const filter = await add(home.id, { title: 'Replace water filter', emoji: '🚰', scheduleType: 'every_n_days', intervalDays: 90, startDate: ago(75), dueTime: '11:00', graceMinutes: 0 });
+
+  // The routines are as old as their history below, so nothing before it
+  // counts as missed; the bills are older, so last month's rent shows too.
+  const HISTORY_DAYS = 42;
+  const dated = [rent.id, power.id, papasBirthday.id, insurance.id, filter.id];
+  await sql`
+    update tasks set created_at = case when id = any(${dated}::uuid[]) then ${today.minus({ days: 60 }).toJSDate()}::timestamptz
+                                       else ${today.minus({ days: HISTORY_DAYS }).toJSDate()}::timestamptz end
+    where group_id in (${personal.id}, ${home.id})`;
+
+  const tick = async (task: { id: string; dueTime: string }, occurrence: string, doneOn: string, memberId: string, by: string) => {
+    const [hour, minute] = task.dueTime.split(':').map(Number);
+    const at = DateTime.fromISO(doneOn, { zone: TZ }).set({ hour, minute }).plus({ minutes: roll(task.id + doneOn) % 40 });
+    const completedAt = new Date(Math.min(at.toMillis(), Date.now()));
+    await sql`
+      insert into task_completions (task_id, member_id, completed_by, occurrence_date, completed_at)
+      values (${task.id}, ${memberId}, ${by}, ${occurrence}, ${completedAt})
+      on conflict do nothing`;
+  };
+  const [myPersonal] = await sql`select id from members where group_id = ${personal.id} and user_id = ${user.id}`;
+
+  // Six weeks of daily and weekly routines, with misses: a few more at weekends.
+  // Meals and the gym follow the food log and workouts below, as log-once would.
+  const routine = [
+    ...personalTasks.map((t) => ({ t, member: myPersonal.id, by: user.id, missRate: 10 })),
+    ...homeTasks.map((t) => ({ t, member: me.id, by: user.id, missRate: 14 })),
+    { t: kidBrush, member: kid.id, by: user.id, missRate: 20 },
+    { t: bpTablet, member: papaMember.id, by: papa.id, missRate: 8 },
+  ];
+  const mealDays = new Map<string, Set<string>>(); // meal -> dates with a food entry, from the menu below
+  for (let back = HISTORY_DAYS; back >= 1; back -= 1) {
     const day = today.minus({ days: back });
-    for (const task of personalTasks) {
-      if (task.scheduleType === 'weekly' && !task.daysOfWeek.includes(day.weekday)) continue;
-      if ((back + task.title.length) % 6 === 0) continue;
-      await sql`
-        insert into task_completions (task_id, completed_by, occurrence_date, completed_at)
-        values (${task.id}, ${user.id}, ${day.toISODate()}, ${day.set({ hour: 12 }).toJSDate()})
-        on conflict do nothing`;
+    const date = day.toISODate() as string;
+    for (const { t, member, by, missRate } of routine) {
+      if (t.scheduleType !== 'daily' && t.scheduleType !== 'weekly') continue;
+      if (t.scheduleType === 'weekly' && !t.daysOfWeek?.includes(day.weekday)) continue;
+      if (t.autoComplete) continue;
+      if (roll(`${t.title}:${date}`) < (day.weekday >= 6 ? missRate * 2 : missRate)) continue;
+      await tick(t, date, date, member, by);
     }
   }
+
+  // Weekly quotas: the bathroom twice most weeks, vacuuming on Sundays.
+  for (let weeksAgo = 6; weeksAgo >= 0; weeksAgo -= 1) {
+    const monday = today.minus({ weeks: weeksAgo }).startOf('week');
+    const days: [title: string, weekday: number][] = [['Clean bathroom', 3], ['Clean bathroom', 6], ['Vacuum and mop', 7]];
+    for (const [title, weekday] of days) {
+      const day = monday.plus({ days: weekday - 1 });
+      if (day >= today || roll(`${title}:${weeksAgo}:${weekday}`) < 15) continue;
+      const t = homeTasks.find((h) => h.title === title)!;
+      await tick(t, day.toISODate() as string, day.toISODate() as string, me.id, user.id);
+    }
+  }
+
+  // Bills: rent paid on the day (the oldest one two days late); this month's
+  // electricity is still to pay, so it waits on Today.
+  const rentDates = scheduledBetween(rent, ago(60), todayIso);
+  for (const [i, date] of rentDates.entries()) {
+    await tick(rent, date, i === 0 && rentDates.length > 1 ? addDays(date, 2) : date, me.id, user.id);
+  }
+  for (const date of scheduledBetween(power, ago(60), todayIso).slice(0, -1)) await tick(power, date, date, me.id, user.id);
+  await tick(filter, ago(75), ago(75), me.id, user.id);
+  // Bedsheets: changed every week or so; next due in two days.
+  const sheets = homeTasks.find((h) => h.title === 'Change bedsheets')!;
+  for (const back of [20, 12, 5]) await tick(sheets, ago(back), ago(back), me.id, user.id);
+  await recomputeTaskTimes(sql, sheets.id);
 
   // Six weeks of push, legs and pull on Monday, Wednesday and Friday, a little
   // heavier each week, so the progress charts have a story to show.
@@ -119,6 +206,8 @@ async function seedDemo(): Promise<void> {
             values (${workout.id}, ${await exerciseId(name)}, ${position}, ${reps}, ${weightKg})`;
         }
       }
+      const gym = personalTasks.find((t) => t.autoComplete === 'workout')!;
+      await tick(gym, day.toISODate() as string, day.toISODate() as string, myPersonal.id, user.id);
     }
   }
 
@@ -138,12 +227,22 @@ async function seedDemo(): Promise<void> {
       const k = grams / 100;
       await sql`
         insert into food_entries (user_id, food_id, food_name, eaten_on, meal, quantity_g, kcal, protein_g, carbs_g, fat_g)
-        values (${user.id}, ${food.id}, ${food.name}, ${today.minus({ days: daysAgo }).toISODate()}, ${meal}, ${grams},
+        values (${user.id}, ${food.id}, ${food.name}, ${ago(daysAgo)}, ${meal}, ${grams},
                 ${food.kcal * k}, ${food.proteinG * k}, ${food.carbsG * k}, ${food.fatG * k})`;
+      if (!mealDays.has(meal)) mealDays.set(meal, new Set());
+      mealDays.get(meal)!.add(ago(daysAgo));
+    }
+  }
+  // Meal tasks: ticked by the food log this week (log-once), earlier weeks by hand.
+  for (const t of personalTasks.filter((p) => p.autoComplete && p.autoComplete !== 'workout')) {
+    for (let back = HISTORY_DAYS; back >= 0; back -= 1) {
+      const date = ago(back);
+      const logged = back < menu.length ? mealDays.get(t.autoComplete as string)?.has(date) : roll(`${t.title}:${date}`) >= 12;
+      if (logged) await tick(t, date, date, myPersonal.id, user.id);
     }
   }
 
-  log.info(`demo account created: sign in as ${DEMO_EMAIL} with password ${DEMO_PASSWORD}`);
+  log.info(`demo account created: sign in as ${DEMO_EMAIL} (or ${PAPA_EMAIL}) with password ${DEMO_PASSWORD}`);
 }
 
 try {
